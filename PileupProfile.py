@@ -5,7 +5,6 @@ import os
 import argparse
 import iRep
 import numpy as np
-import genome_variation as gv
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import time
