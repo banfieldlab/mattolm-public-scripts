@@ -1,12 +1,27 @@
 #!/usr/bin/env python3
 
+# See GitHub repositories https://github.com/banfieldlab/mattolm-public-scripts and 
+# https://github.com/christophertbrown/iRep for up-to-date versions and dependencies
+
+# Matt Olm
+# mattolm@berkeley.edu
+
 # Adopted heavily from Chris Brown's Calculate_coverage.py and iRep (2.15.16)
+
+# Version 0.2
+# Added the --scaffolds flag
+# 11.16.16
 
 import sys
 import os
 import argparse
 import numpy as np
 import pandas as pd
+import tempfile
+import textwrap
+import shutil
+import glob
+from subprocess import call
 
 from mapped import get_reads as mapped
 from fasta import iterate_fasta as parse_fasta
@@ -74,7 +89,7 @@ def print_coverage(coverage, sams):
 
 def open_files(files):
     """
-    open files in list, use stdin if first 
+    open files in list, use stdin if first
     item in list is '-'
     """
     if files is None:
@@ -82,6 +97,48 @@ def open_files(files):
     if files[0] == '-':
         return [sys.stdin]
     return [open(i) for i in files]
+
+
+def split_scaffolds(files):
+    # Make Temp Directory
+    temp_dir = '.calc_breadth_tempdir/'
+    if os.path.exists(temp_dir):
+        print('Temp directory {0} already exists- delete before running again'.format(temp_dir))
+        sys.exit()
+    else:
+        os.makedirs(temp_dir)
+        
+    # Fill it with single-scaffold .fasta files
+    r_files = []
+    last = ''
+    for file in files:
+        print('splitting {0} into scaffolds'.format(file))
+        sequence = ''
+        
+        # Split them
+        with open(file) as f:
+            for line in f:
+                if line.startswith('>'):
+                    if len(sequence) > 0:
+                        filename = "{0}{1}.fasta".format(temp_dir, last)
+                        write_fasta(filename,sequence,last)
+                        r_files.append(filename)
+                        #print('wrote {0}'.format(filename))
+                    sequence = ''
+                    last = line.strip()[1:].split(' ')[0]
+                else:
+                    sequence += line.strip()
+            filename = "{0}{1}.fasta".format(temp_dir, last)
+            write_fasta(filename,sequence,last)
+            r_files.append(filename)
+            
+    # Return a list of these .fasta files
+    return r_files
+
+def write_fasta(file,seq,name):
+    with open(file, 'a') as f:
+        f.write('>{0}\n'.format(name))
+        f.write(textwrap.fill(seq,80))
 
 def iterate_sams(sams, combine = False):
     coverage = {}
@@ -91,7 +148,7 @@ def iterate_sams(sams, combine = False):
         coverage, sams = combine_by_sample(coverage)
     coverage = calculate_coverage(coverage)
     return coverage, sams
-    
+
 def filter_mapping(sam, mismatches, sort_sam = False, sbuffer = 100):
     """
     create generator for filtering mapping
@@ -100,21 +157,21 @@ def filter_mapping(sam, mismatches, sort_sam = False, sbuffer = 100):
             'both', sort_sam, False, False, sbuffer):
         if type == 10 or type == 20:
             yield read
-            
+
 def parse_genomes_fa(fastas, mappings):
     """
     genomes[genome name] = {order: [contig order], samples: {}}
         samples[sample name] = {cov: [coverage by position], contigs: {}}
             contigs[contig name] = [coverage by position]
     """
-    id2g = {} # contig ID to genome lookup 
+    id2g = {} # contig ID to genome lookup
     genomes = {} # dictionary for saving genome info
     for genome in fastas:
         name = genome.name
         samples = {s[0]:{'contigs':{}, 'cov':[]} for s in mappings}
         g = genomes[name] = {'order':[], 'samples':samples}
         g['len'] = 0
-        for seq in parse_fasta(genome): 
+        for seq in parse_fasta(genome):
             ID = seq[0].split('>', 1)[1].split()[0]
             g['order'].append(ID)
             id2g[ID] = name
@@ -140,14 +197,14 @@ def calc_coverage(genomes, mappings, id2g):
             start, length = int(read[3]), len(read[9])
             end = start + length - 1
             for i in range(start - 1, end):
-                try: 
+                try:
                     genomes[id2g[c]]['samples'][sample]\
                             ['contigs'][c][i] += 1
                 except:
                     continue
     # combine coverage data for contigs
     for genome in list(genomes.values()):
-        order, samples = genome['order'], genome['samples'] 
+        order, samples = genome['order'], genome['samples']
         for sample in list(samples.values()):
             for contig in order:
                 try:
@@ -157,7 +214,7 @@ def calc_coverage(genomes, mappings, id2g):
                     continue
             sample['avg_cov'] = np.average(sample['cov'])
     return genomes
-            
+
 def iRep(fastas, id2g, mappings, out, threads):
     """
     est. growth from slope of coverage
@@ -168,9 +225,9 @@ def iRep(fastas, id2g, mappings, out, threads):
     genomes, id2g = parse_genomes_fa(fastas, mappings)
     # get coverage from sam files
     genomes = calc_coverage(genomes, mappings, id2g)
-    
+
     return genomes
-    
+
 def toPandas(genomes, outt):
     genome = {}
     samples = {}
@@ -180,14 +237,14 @@ def toPandas(genomes, outt):
     length = {}
     zero_count = {}
     br = {}
-    
+
     i = 0
     keys = {}
     gens = {}
     samps = {}
     for g in genomes:
         for sample in genomes[g]['samples']:
-            genome[i] = g
+            genome[i] = os.path.basename(g)
             samples[i] = sample
             median_coverage[i] = np.median(genomes[g]['samples'][sample]['cov'])
             average_coverage[i] = genomes[g]['samples'][sample]['avg_cov']
@@ -196,7 +253,7 @@ def toPandas(genomes, outt):
             zero_count[i] = list(genomes[g]['samples'][sample]['cov']).count(0)
             br[i] = 1 - (zero_count[i] /  length[i])
             i += 1
-    
+
     data = pd.DataFrame({ 'genome' : pd.Series(genome),
                             'sample' : pd.Series(samples),
                             'average_cov' : pd.Series(average_coverage),
@@ -205,7 +262,7 @@ def toPandas(genomes, outt):
                             'median_cov' : pd.Series(median_coverage),
                             'zero_count' : pd.Series(zero_count),
                             'breadth' : pd.Series(br)})
-                                
+
     data.to_csv(outt + ".csv")
 
 if __name__ == '__main__':
@@ -226,17 +283,24 @@ if __name__ == '__main__':
             '--verbose', action = 'store_true', \
             help = 'optional - print output to screen as well as file')
     parser.add_argument(\
+            '--scaffolds', action = 'store_true', \
+            help = 'calculate breadth of each scaffold in the input')
+    parser.add_argument(\
             '-t', required = False, default = 6, type = int, \
             help = 'threads (default: 6)')
     args = vars(parser.parse_args())
-    
-    fastas = open_files(args['f'])
+
+    if args['scaffolds']:
+        scaffolds = split_scaffolds(args['f'])
+        fastas = open_files(scaffolds)
+    else:
+        fastas = open_files(args['f'])
     sams, mm = args['s'], args['mm']
     mappings = [[s, filter_mapping(s, mm)] for s in sams]
     s2bin = None
-    
+
     genomes = iRep(fastas, s2bin, mappings, args['o'], args['t'])
-    
+
     if args['verbose']:
         for genome in genomes:
             print(genome)
@@ -249,5 +313,10 @@ if __name__ == '__main__':
                 print("Std")
                 print((np.std(genomes[genome]['samples'][sample]['cov'])))
                 print("")
-            
+
     toPandas(genomes, args['o'])
+    
+    if args['scaffolds']:
+        for f in fastas:
+            f.close()
+        shutil.rmtree('.calc_breadth_tempdir/')
