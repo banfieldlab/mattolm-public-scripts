@@ -1,5 +1,16 @@
 #!/usr/bin/python3
 
+# See GitHub repositories https://github.com/banfieldlab/mattolm-public-scripts and 
+# https://github.com/christophertbrown/iRep for up-to-date versions and dependencies
+
+# Matt Olm
+# mattolm@berkeley.edu
+
+# Version 0.2
+# Matt Olm
+# mattolm@berkeley.edu
+# 10.27.16
+
 import argparse
 import glob
 import pandas as pd
@@ -88,8 +99,8 @@ def parseBases(infile, pileups):
         linewords = line.split()
         location = linewords[0].strip()
         tempList.append(location)
-    dic = {}
-    ref = {}
+    dic = {} # for each code, this holds the sum of all bases
+    ref = {} # for each code, this holds the reference base
     for t in tempList:
         # A C G T
         dic[t] = [0,0,0,0]
@@ -99,7 +110,7 @@ def parseBases(infile, pileups):
         for line in data:
             linewords = line.split()
             code = linewords[0].strip() + ":" + linewords[1].strip()
-            if code in tempList:
+            if code in tempList: # if code is in the list passed as an argument
                 bases = parsePile(line)
                 dic[code] = [x + y for x, y in zip(bases,dic[code])]
                 if code not in ref:
@@ -109,6 +120,10 @@ def parseBases(infile, pileups):
                         print("ERROR AT POSITION " + str(code))
     rList = []
     for t in dic:
+        if t not in ref: # This means that the position has no coverage in all samples
+            print("{0} is not in any pileups- excluding from output".format(t))
+            continue
+        
         var = dic[t].index(max(dic[t]))
         if var is 0: b = 'A'
         elif var is 1: b = 'G'
@@ -204,7 +219,7 @@ def printeOutput():
     for poly in polys:
         print('\t' + str(poly.ori) + ' > ' + str(poly.var), end="\t")
 
-def pandasOut():
+def pandasOut(o):
 
     firstIteration = True
 
@@ -241,7 +256,7 @@ def pandasOut():
                       'location': pd.Series(pos),
                       'variant_base_count' : pd.Series(varC),
                       'reference_base_count' : pd.Series(refC),
-                      'percent_reference' : pd.Series(per_ref),
+                      'percent_variant' : pd.Series(per_ref),
                       'project': pd.Series(proj)})
 
     base_data = pd.DataFrame({ 'scaffold' : pd.Series(scaff),
@@ -249,9 +264,8 @@ def pandasOut():
                       'reference_base' : pd.Series(ref),
                       'varient_base': pd.Series(var)})
 
-    wd = os.getcwd()
-    data.to_csv(wd + "/polymorpher_pandas.csv")
-    base_data.to_csv(wd + "/bases_polymorpher_pandas.csv")
+    data.to_csv(o + "_frequencies.csv",index=False)
+    base_data.to_csv(o + "_bases.csv",index=False)
 
 
 def printRout(name):
@@ -273,7 +287,10 @@ parser.add_argument("-b", "--bases", default = False, action = "store_true",
     help = "input is just a list of bases, varient nucleotides will be determined [default: False].")
 parser.add_argument("-R", "--rOut",
     help = "an output for use in R is made with this name.")
+parser.add_argument("-o", "--out", default = "polymorpher",
+    help = "Basename for outfiles")
 args = parser.parse_args()
+
 
 pileups = args.mpileup
 if args.folder_input: pileups = glob.glob(args.mpileup[0] + '*')
@@ -291,6 +308,6 @@ for pileup in pileups:
     runProject(pileup)
 
 #printeOutput()
-pandasOut()
+pandasOut(args.out)
 #if args.rOut is not None:
  #   printRout(args.rOut)
