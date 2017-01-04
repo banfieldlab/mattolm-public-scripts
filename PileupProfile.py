@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
 
+# See GitHub repositories https://github.com/banfieldlab/mattolm-public-scripts and 
+# https://github.com/christophertbrown/iRep for up-to-date versions and dependencies
+
+# Matt Olm
+# mattolm@berkeley.edu
+
+# Version 0.2
+# - Fixed bug where the reference sequence has a non-ACTG character, it'll now just skip that base instead of crashing
+
 import sys
 import os
 import argparse
 import iRep
 import numpy as np
+import genome_variation as gv
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import time
@@ -154,6 +164,8 @@ def parse_piluep_line(line, SNP_chriteria):
     cov = int(linewords[3])
     ref = linewords[2].upper()
     if ref == 'N':
+        return(cov,False,True)
+    if ref not in ['A','C','T','G']:
         return(cov,False,True)
     min_cov, min_perc = SNP_chriteria
     base_counts = pile_baseCounts(line)
